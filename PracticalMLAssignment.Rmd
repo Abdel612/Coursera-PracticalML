@@ -1,0 +1,108 @@
+---
+title: "Practical Machine Learning Assignment"
+author: "Abdel612"
+date: "21 septembre 2015"
+output: html_document
+---
+
+# Synopsis
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+
+*Project Goal:* Building a model enabling us to predict the quality of the performed movement based of provided sensors' data from 6 people. Quality is one of the following:
+
+* A: exactly according to the specification
+* B: throwing the elbows to the front
+* C: lifting the dumbbell only halfway 
+* D: lowering the dumbbell only halfway
+* E: throwing the hips to the fron
+
+More Info on the dataset can be found at <http://groupware.les.inf.puc-rio.br/har>
+
+**Synthesis:** We used a Random Forest method as it generaly performs very well on such classification challenges. We were able to get a 100% accuracy rate on the coursera project submission.  
+
+# Analysis
+
+## Data cleansing
+
+Let's first read our data file, `workingDF` will hold both training and validation dataset while `testingDF` will hold the dataset we have to predict. Validation dataset is set to represent `30%` of our working set.
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+rm(list=ls())
+workingDF = read.csv("pml-training.csv")
+testingDF = read.csv("pml-testing.csv")
+
+library(caret)
+set.seed(612)
+partition = createDataPartition(workingDF$classe, p = 0.7)[[1]]
+trainingDF = workingDF[ partition,]     
+validDF = workingDF[-partition,]    
+```
+
+Here we go! A close look at the original dataset highlight following items:
+
+* We have a working dataset made of *`r nrow(workingDF)` obs. of `r ncol(workingDF)` variables*. This gives us a **training** dataset made of *`r nrow(trainingDF)` obs.* and a **validation** dataset made of *`r nrow(validDF)` obs.*
+* Lots of `NA` columns parasitize our dataset, we'll get ride of them
+* Although time columns could be of full interest while lokking for the perfect move, we were unable to find the exact meaning of those figures. Decision is taken to not take them into account for our first model. Should tour predictive be too weak, we could then consider another approach by incorpating them in our model and studying the move according to time serie. Hence, `"raw_timestamp_part_1"`, `"raw_timestamp_part_2"`, `"cvtd_timestamp"`, `"new_window"`, `"num_window"` will be removed from our dataset
+* `"X"`, standing for the measure number and `"user_name"` holding the name of the participant don't bring any value to our study. We will then also get ride of them.
+* Columns related to amplitude of `yaw` are of not interest since quite empty. The same is true for columns related to `skewness` and `kurtosis` of any member. One more time we get ride of them.
+
+```{r, echo=TRUE}
+trainingDF = trainingDF[ , colSums(is.na(trainingDF)) == 0]
+trainingDF = subset( trainingDF, select=-c(raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp , new_window, num_window, X, user_name, kurtosis_yaw_belt, skewness_yaw_belt, amplitude_yaw_belt, kurtosis_yaw_dumbbell, skewness_yaw_dumbbell, amplitude_yaw_dumbbell, kurtosis_yaw_forearm, skewness_yaw_forearm, amplitude_yaw_forearm, kurtosis_roll_belt, kurtosis_picth_belt, skewness_roll_belt, skewness_roll_belt.1, max_yaw_belt, min_yaw_belt, kurtosis_roll_arm,kurtosis_picth_arm, kurtosis_yaw_arm, skewness_roll_arm,skewness_pitch_arm,skewness_yaw_arm, kurtosis_roll_dumbbell, kurtosis_picth_dumbbell,skewness_roll_dumbbell, skewness_pitch_dumbbell,max_yaw_dumbbell, min_yaw_dumbbell, kurtosis_roll_forearm,kurtosis_picth_forearm, skewness_roll_forearm, skewness_pitch_forearm, max_yaw_forearm, min_yaw_forearm) )
+```
+
+# Data Modeling
+## Low variation
+Now that we have a quite tidy training dataset, the last effort we can make it to remove variable with low variance since they do not bring us any value in building our model. This statement have to be understood in the frame of a classification problem (for regression modeling they could have helped)
+```{r, echo=TRUE}
+nearZeroVarianceDF <- nearZeroVar(trainingDF, saveMetrics=TRUE)
+nearZeroVarianceDF$nzv
+```
+Great! No variable is somehow constant.
+
+## Model building
+This kind of classification problem is a good candidate for random forest forecasting. Let's try to build our model and compute the related confusion matrix with our (cross-)validation dataset. 
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+library(randomForest)
+rfModel = randomForest(classe ~., data=trainingDF, allowParallel=TRUE ) #Build the model
+```
+The obtained model is described by the following:
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+rfModel # Output the model information
+cm=confusionMatrix(rfModel$y,trainingDF$classe)
+cm$table
+```
+
+
+It looks quite good since the accuracy of our model on the training set is between **`r cm$overall["AccuracyLower"]`** and **`r cm$overall["AccuracyUpper"]`** which is pretty good. Let's cross validate this model against the validation set:
+
+## Cross validation
+````{r, echo=TRUE}
+validPred=predict(rfModel, newdata=validDF)
+cmcv=confusionMatrix(validPred,validDF$classe)
+cmcv$table
+```
+Still nice! Our the obtained accuracy of our model against the validation set is between **`r cmcv$overall["AccuracyLower"]`** and **`r cmcv$overall["AccuracyUpper"]`**. **Those 2 figures are the estimate of our accuracy on the testing set.**
+
+
+# Assignement submission
+Following direction given for the project submission, the following code enables us to create a separate file for each of the testing case. We will use the testing set to submit our project.
+```{r, echo=TRUE}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+testPred=predict(rfModel, newdata=testingDF)
+testPred #Output the prediction
+pml_write_files(testPred)
+```
+
+# Conclusion
+
+* The provided model gives us pretty good predictions, but with an accuracy > 95%, we can wonder if we are not overfitting or whether the provided data were not biais.
+* Not graphics have been provided to the readers since classification tree is such a situation where lots of predictors are used (up to 52) are unreadable and therefore are of no value if we do not reduct that number.
+* The assumption made in designing our model (not taking into account time variable) is verified. Hence we can state that our model is a good one (100% accuration on Coursera Project Submission.)
